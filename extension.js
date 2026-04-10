@@ -26,50 +26,61 @@ import GLib from "gi://GLib";
 export default class DockMediaPlayerExtension extends Extension {
     enable() 
     {
-        this._mediaWidget = new MediaWidget();
+        this._settings = this.getSettings();
+        
+        this._mediaWidget = new MediaWidget(this._settings);
         this._mediaController = new MediaController((busName, newStatus, trackInfo) => {
             this.onMediaStatusChanged(busName, newStatus, trackInfo);
         });
 
-        this._mediaController.startWatching();
         this._mediaWidget.setMediaController(this._mediaController);
+        
+        this._dashBox = null;
+        this._settingsSignalIds = [];
+        this._settingsSignalIds.push(
+            this._settings.connect('changed::widget-position', () => {
+                this.repositionWidget();
+            })
+        );
 
         this.insertIntoDash();
     }
 
-    insertIntoDash() {
-    const attach = (actor) => {
-        if (!this._mediaWidget.get_parent()) {
-            this.attachMediaWidget(actor);
+    insertIntoDash() 
+    {
+        const attach = (actor) => {
+            if (!this._mediaWidget.get_parent()) {
+                this.attachMediaWidget(actor);
+            }
+        };
+    
+        const existingDash = Main.uiGroup.get_children().find(
+            actor => actor.get_name() === 'dashtodockContainer' && actor.constructor.name === 'DashToDock'
+        );
+    
+        if (existingDash) 
+        {
+            attach(existingDash);
+            return;
         }
-    };
-
-    const existingDash = Main.uiGroup.get_children().find(
-        actor => actor.get_name() === 'dashtodockContainer' &&
-                 actor.constructor.name === 'DashToDock'
-    );
-
-    if (existingDash) {
-        attach(existingDash);
-        return;
+    
+        this._dashAddedID = Main.uiGroup.connect('child-added', (_, actor) => {
+            if (actor.get_name() === 'dashtodockContainer' && actor.constructor.name === 'DashToDock') 
+            {
+                Main.uiGroup.disconnect(this._dashAddedID);
+                this._dashAddedID = null;
+    
+                attach(actor);
+            }
+        });
     }
-
-    this._dashAddedID = Main.uiGroup.connect('child-added', (_, actor) => {
-        if (actor.get_name() === 'dashtodockContainer' &&
-            actor.constructor.name === 'DashToDock') {
-
-            Main.uiGroup.disconnect(this._dashAddedID);
-            this._dashAddedID = null;
-
-            attach(actor);
-        }
-    });
-}
 
     onMediaStatusChanged(busName, newStatus, trackInfo)
     {
         if (!this._mediaWidget)
+        {
             return;
+        }
 
         if (newStatus === MediaStatus.PLAYING || newStatus === MediaStatus.PAUSED)
         {
@@ -93,36 +104,92 @@ export default class DockMediaPlayerExtension extends Extension {
     attachMediaWidget(dashToDock)
     {
         const dash = dashToDock.dash;
+        this._dashBox = dash._box;
+        
         GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
             const iconSize = dash.iconSize ?? 32;
             this._mediaWidget._albumCoverArt.set_size(iconSize, iconSize);
             return GLib.SOURCE_REMOVE;
         });
 
-        dash._box.add_child(this._mediaWidget);
+        this.insertWidgetIntoDashBox();
+        
         this._mediaWidget.set_y_expand(false);
         this._mediaWidget.set_x_expand(false);
         this._mediaWidget.collapseContainer(() => {});
+        
+        this._mediaController.startWatching();
+    }
+    
+    insertWidgetIntoDashBox()
+    {
+        if (!this._dashBox || !this._mediaWidget)
+        {
+            return;
+        }
+        
+        //Remove from current parent if we already attached the widget
+        if (this._mediaWidget.get_parent() == this._dashBox)
+        {
+            this._dashBox.remove_child(this._mediaWidget);
+        }
+        
+        const position = this._settings.get_string('widget-position');
+        if (position === 'start')
+        {
+            this._dashBox.insert_child_at_index(this._mediaWidget, 0);
+        }
+        else
+        {
+            this._dashBox.add_child(this._mediaWidget);
+        }
+    }
+    
+    //Called when we change widget position at runtime
+    repositionWidget()
+    {
+        if (!this._dashBox || !this._mediaWidget)
+        {
+            return;
+        }
+        
+        this.insertWidgetIntoDashBox();
     }
 
-disable() {
-    if (this._dashAddedID) {
-        Main.uiGroup.disconnect(this._dashAddedID);
-        this._dashAddedID = null;
-    }
-
-    if (this._mediaWidget) {
-        this._mediaWidget.collapseContainer(() => {
-            if (this._mediaWidget.get_parent()) {
-                this._mediaWidget.get_parent().remove_child(this._mediaWidget);
+    disable() {
+        if (this._settings)
+        {
+            for (const id of this._settingsSignalIds)
+            {
+                this._settings.disconnect(id);
             }
-            this._mediaWidget = null;
-        });
+            
+            this._settingsSignalIds = [];
+        }
+        
+        if (this._dashAddedID) {
+            Main.uiGroup.disconnect(this._dashAddedID);
+            this._dashAddedID = null;
+        }
+    
+        if (this._mediaWidget) {
+            this._mediaWidget.disconnectSignals();
+            
+            this._mediaWidget.collapseContainer(() => {
+                if (this._mediaWidget && this._mediaWidget.get_parent()) {
+                    this._mediaWidget.get_parent().remove_child(this._mediaWidget);
+                }
+                
+                this._mediaWidget = null;
+            });
+        }
+    
+        if (this._mediaController) {
+            this._mediaController.destroy();
+            this._mediaController = null;
+        }
+        
+        this._dashBox = null;
+        this._settings = null;
     }
-
-    if (this._mediaController) {
-        this._mediaController.destroy();
-        this._mediaController = null;
-    }
-}
 }

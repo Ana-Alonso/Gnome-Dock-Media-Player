@@ -7,19 +7,24 @@ import Gio from "gi://Gio";
 import GLib from "gi://GLib";
 import GdkPixbuf from "gi://GdkPixbuf";
 import Pango from 'gi://Pango';
-import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 
 const TITLE_FALLBACK = "Unknown Title";
 const ARTIST_FALLBACK = "Unknown Artist";
 const EXPANDED = 'expanded';
 const COLLAPSED = 'collapsed';
-const TRANSITION_DURATION_MS = 300;
+
+//Fallback values when no settings are provided
+const DEFAULT_WIDGET_WIDTH = 280;
+const DEFAULT_ANIMATION_DURATION = 300;
+const DEFAULT_BACKGROUND_OPACITY = 0.5;
+const DEFAULT_SHOW_ARTIST = true;
+const DEFAULT_SHOW_CONTROLS = true;
 
 export const MediaWidget = GObject.registerClass(
-    class MediaWidget extends St.BoxLayout 
+    class MediaWidget extends St.BoxLayout
     {
-        _init() 
+        _init(settings = null)
         {
             super._init({
                 style_class: StyleClassNames.MediaWidget,
@@ -29,9 +34,116 @@ export const MediaWidget = GObject.registerClass(
                 y_align: Clutter.ActorAlign.CENTER,
             });
 
+            this._settings = settings;
+            this._settingSignals = [];
+            this._lastArtUrl = null;
+            this._lastAverageColors = null;
+            
             this.createWidgets();
             this.assembleLayout();
             this.initButtonCallbacks();
+            this.connectSettings();
+        }
+        
+        connectSettings()
+        {
+            if (!this._settings)
+            {
+                return;
+            }
+            
+            const watch = (key, handler) => {
+                handler(); //aply
+                this._settingSignals.push(this._settings.connect(`changed::${key}`, handler));
+            }
+            
+            watch('show-artist', () => this.applyShowArtist());
+            watch('show-controls', () => this.applyShowControls());
+            watch('widget-width', () => {
+                if (this._currentStatus === COLLAPSED)
+                {
+                    return;
+                }
+                
+                this.remove_all_transitions();
+                this.ease({
+                    width: this.getWidgetWidth(),
+                    duration: this.getAnimationDuration(),
+                    mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+                })
+            });
+            watch('background-opacity', () => {
+                if (this._lastAverageColors)
+                {
+                    this.applyBackgroundColor(this._lastAverageColors);
+                }
+            });
+        }
+        
+        disconnectSignals()
+        {
+            if (!this._settings)
+            {
+                return;
+            }
+            
+            for (const id of this._settingSignals)
+            {
+                this._settings.disconnect(id);
+            }
+            
+            this._settingSignals = [];
+        }
+        
+        getIntPropertyFromSettings(key, defaultValue)
+        {
+            return this._settings ? this._settings.get_int(key) : defaultValue;
+        }
+        
+        getBoolPropertyFromSettings(key, defaultValue)
+        {
+            return this._settings ? this._settings.get_boolean(key) : defaultValue;
+        }
+        
+        getWidgetWidth()
+        {
+            return this.getIntPropertyFromSettings('widget-width', DEFAULT_WIDGET_WIDTH);
+        }
+        
+        getAnimationDuration()
+        {
+            return this.getIntPropertyFromSettings('animation-duration', DEFAULT_ANIMATION_DURATION);
+        }
+        
+        getBackgroundOpacity()
+        {
+            return this._settings ? this._settings.get_double('background-opacity') : DEFAULT_BACKGROUND_OPACITY;
+        }
+        
+        applyShowArtist()
+        {
+            const show = this.getBoolPropertyFromSettings('show-artist', DEFAULT_SHOW_ARTIST);
+            if (show)
+            {
+                this._artistName.show();
+            }
+            else
+            {
+                this._artistName.hide();
+            }
+        }
+        
+        applyShowControls()
+        {
+            const show = this.getBoolPropertyFromSettings('show-controls', DEFAULT_SHOW_CONTROLS);
+            if (show)
+            {
+                this._playbackControls.show();
+            }
+            else
+            {
+                this._playbackControls.hide();
+            }
         }
 
         setMediaController(mediaController)
@@ -39,14 +151,14 @@ export const MediaWidget = GObject.registerClass(
             this._mediaController = mediaController;
         }
 
-        createWidgets() 
+        createWidgets()
         {
-
             this._mainContainer = new St.BoxLayout({
                 style_class: StyleClassNames.MainContainer,
                 vertical: false,
                 x_expand: false,
                 y_expand: false,
+                clip_to_allocation: true,
             });
 
             // Widget layout is split into 2 main containers: left (album cover art) and right (metadata and controls)
@@ -206,7 +318,7 @@ export const MediaWidget = GObject.registerClass(
             });
         }
 
-        canUsePlaybackControls() 
+        canUsePlaybackControls()
         {
             //#TODO: Add MPRIS check for CanGoNext, CanGoPrevious...
             return this._mediaController !== null;
@@ -219,24 +331,19 @@ export const MediaWidget = GObject.registerClass(
             this._mediaTitle.set_text(String(metadata.title || TITLE_FALLBACK));
             this._artistName.set_text(String(metadata.artist || ARTIST_FALLBACK));
 
-            if (metadata.artUrl)
+            //Only reload art cover when the URL changes to avoid unnecessary fetch calls
+            if (metadata.artUrl && metadata.artUrl !== this._lastArtUrl)
             {
+                this._lastArtUrl = metadata.artUrl;
                 this.setupWidgetStyle(metadata.artUrl).catch(err => {
                     logError(err, "Failed to load album art");
                     this.enableFallbackStyle();
                 });
             }
-            else
+            else if (!metadata.artUrl)
             {
+                this._lastArtUrl = null;
                 this.enableFallbackStyle();
-
-                if (this._currentStatus === EXPANDED)
-                {
-                    GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
-                        this.updateContainerWidth();
-                        return GLib.SOURCE_REMOVE;
-                    });
-                }
             }
 
             this.updatePlayPauseButton(status);
@@ -268,11 +375,9 @@ export const MediaWidget = GObject.registerClass(
                 file = Gio.File.new_for_path(artUrl);
             }
 
-            let inputStream;
-
             try
             {
-                inputStream = await new Promise((resolve, reject) => {
+                const inputStream = await new Promise((resolve, reject) => {
                     file.read_async(GLib.PRIORITY_DEFAULT, null, (source, result) => {
                         try
                         {
@@ -303,6 +408,7 @@ export const MediaWidget = GObject.registerClass(
             catch (e)
             {
                 logError(e);
+                throw e;
             }
         }
 
@@ -312,7 +418,7 @@ export const MediaWidget = GObject.registerClass(
             {
                 const { pixBuf, file } = await this.loadPixbufFromUrl(artUrl);
 
-                const fileIcon = new Gio.FileIcon({ file: file });
+                const fileIcon = new Gio.FileIcon({ file });
                 this._albumCoverArt.set_child(new St.Icon({
                     gicon: fileIcon,
                     y_align: Clutter.ActorAlign.CENTER,
@@ -334,22 +440,24 @@ export const MediaWidget = GObject.registerClass(
 
         setTextLabelColors(pixBuf)
         {
-            //#TODO: Animate
             const averageColors = CoverArtHelpers.getAverageRGB(pixBuf);
-            
-            //Sets background color of the main container (this widget)
-            this.set_style(`background-color: rgba(${averageColors[0]}, ${averageColors[1]}, ${averageColors[2]}, 0.5);`);
+            this._lastAverageColors = averageColors;
+            this.applyBackgroundColor(averageColors);
 
             const isDark = CoverArtHelpers.isDark(averageColors);
-            const mediaNameColor = isDark ? DefaultColors.MediaTitleLight : DefaultColors.MediaTitleDark;
-            const artistNameColor = isDark ? DefaultColors.ArtistNameLight : DefaultColors.ArtistNameDark;
-
-            this.setTextLabelColor(this._mediaTitle, mediaNameColor);
-            this.setTextLabelColor(this._artistName, artistNameColor);
+            this.setTextLabelColor(this._mediaTitle,  isDark ? DefaultColors.MediaTitleLight  : DefaultColors.MediaTitleDark);
+            this.setTextLabelColor(this._artistName,  isDark ? DefaultColors.ArtistNameLight  : DefaultColors.ArtistNameDark);
+        }
+        
+        applyBackgroundColor(color)
+        {
+            const opacity = this.getBackgroundOpacity();
+            this.set_style(`background-color: rgba(${color[0]}, ${color[1]}, ${color[2]}, ${opacity.toFixed(2)});`);
         }
 
         enableFallbackStyle()
         {
+            this._lastAverageColors = null;
             this.set_style(`background-color: ${DefaultColors.FallbackBackground};`);
             this._mediaTitle.set_style(`color: ${DefaultColors.MediaTitleLight};`);
             this._artistName.set_style(`color: ${DefaultColors.ArtistNameLight};`);
@@ -365,11 +473,14 @@ export const MediaWidget = GObject.registerClass(
             this.show();
             this._currentStatus = EXPANDED;
             this.remove_all_transitions();
-
             this.set_width(0);
-            GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
-                this.updateContainerWidth();
-                return GLib.SOURCE_REMOVE;
+            this.set_opacity(0);
+
+            this.ease({
+                width: this.getWidgetWidth(),
+                opacity: 255,
+                duration: this.getAnimationDuration(),
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD,
             });
         }
 
@@ -385,43 +496,19 @@ export const MediaWidget = GObject.registerClass(
             this.ease({
                 width: 0,
                 opacity: 0,
-                duration: TRANSITION_DURATION_MS,
+                duration: this.getAnimationDuration(),
                 mode: Clutter.AnimationMode.EASE_OUT_QUAD,
                 onComplete: () => {
-
-                    //The animation could be intrrupted by another expand call
                     if (this._currentStatus === COLLAPSED)
                     {
                         this.hide();
                     }
 
-                    if (callback && typeof callback === 'function')
+                    if (typeof callback === 'function')
                     {
                         callback();
                     }
                 },
-            })
-        }
-
-        //Update the widget width to prefered size once UI info is updated
-        updateContainerWidth()
-        {
-            let currentWidth = this.width;
-
-            //Needed to recalculate prefered width
-            this.set_width(-1);
-
-            let [minWidth, naturalWidth] = this.get_preferred_width(-1);
-
-            this.set_width(currentWidth);
-            let targetWidth = Math.min(Math.max(naturalWidth, 180), 300);
-            this.remove_all_transitions();
-
-            this.ease({
-                width: targetWidth,
-                opacity: 255,
-                duration: TRANSITION_DURATION_MS,
-                mode: Clutter.AnimationMode.EASE_OUT_QUAD,
             });
         }
     }

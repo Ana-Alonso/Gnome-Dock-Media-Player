@@ -7,13 +7,14 @@
     "46",
     "47",
     "48",
-    "49"
+    "49",
+    "50"
   ],
-  "url": "https://github.com/pajgla/Gnome-Dash-To-Dock-Media-Player",
+  "url": "https://github.com/pajgla/Gnome-Dock-Media-Player",
   "donations": {
     "github": "Pajgla",
     "paypal": "Pajgla00"
   },
-  "version": 5,
-  "version-name": "1.2"
+  "version": 6,
+  "version-name": "1.3"
 }

@@ -24,6 +24,7 @@
     font-weight: bold;
     font-size: 12px;
     color: white;
+    min-width: 0;
 }
 
 .dmp-rcontainer-bottom-row {
@@ -33,24 +34,31 @@
 .dmp-media-artist-label{
     font-size: 10px;
     color: #cccccc;
-    y-align: center;
+    min-width: 0;
 }
 
 .dmp-playback-controls {
     spacing: 4px;
-    y-align: center;
 }
 
 .dmp-play-pause-button,
 .dmp-next-button,
 .dmp-previous-button {
     padding: 6px;
+    border-radius: 6px;
+    transition-duration: 150ms;
 }
 
 .dmp-play-pause-button:hover,
 .dmp-next-button:hover,
 .dmp-previous-button:hover {
     background-color: rgba(255, 255, 255, 0.1);
+}
+
+.dmp-play-pause-button:active,
+.dmp-next-button:active,
+.dmp-previous-button:active {
+    background-color: rgba(255, 255, 255, 0.25);
 }
 
 .dmp-play-pause-button StIcon,
