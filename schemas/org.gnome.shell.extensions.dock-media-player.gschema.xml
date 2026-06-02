@@ -13,6 +13,16 @@
       <range min="160" max="500"/>
     </key>
 
+    <key name="widget-height" type="i">
+      <default>72</default>
+      <summary>Widget height</summary>
+      <description>
+        Height of the media player widget in pixels
+        Range: 48 – 180
+      </description>
+      <range min="48" max="180"/>
+    </key>
+
     <key name="background-opacity" type="d">
       <default>0.5</default>
       <summary>Background opacity</summary>

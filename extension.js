@@ -105,17 +105,16 @@ export default class DockMediaPlayerExtension extends Extension {
   attachMediaWidget(dashToDock) {
     const dash = dashToDock.dash;
     this._dashBox = dash._box;
-    this._mediaWidget.setDockBox(this._dashBox);
 
     GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
       const iconSize = dash.iconSize ?? 32;
       this._mediaWidget._albumCoverArt.set_size(iconSize, iconSize);
-      this._mediaWidget.setDockIconSize(iconSize);
       return GLib.SOURCE_REMOVE;
     });
 
     this.insertWidgetIntoDashBox();
 
+    this._mediaWidget.set_x_expand(false);
     this._mediaWidget.set_y_expand(false);
     this._mediaWidget.collapseContainer(() => {});
 

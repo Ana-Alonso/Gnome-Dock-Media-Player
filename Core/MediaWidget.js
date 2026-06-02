@@ -15,6 +15,7 @@ const COLLAPSED = "collapsed";
 
 //Fallback values when no settings are provided
 const DEFAULT_WIDGET_WIDTH = 280;
+const DEFAULT_WIDGET_HEIGHT = 72;
 const DEFAULT_ANIMATION_DURATION = 300;
 const DEFAULT_BACKGROUND_OPACITY = 0.5;
 const DEFAULT_SHOW_ARTIST = true;
@@ -35,9 +36,6 @@ export const MediaWidget = GObject.registerClass(
       this._settingSignals = [];
       this._lastArtUrl = null;
       this._lastAverageColors = null;
-      this._dockBox = null;
-      this._dockIconSize = null;
-      this._isDockVertical = false;
 
       this.createWidgets();
       this.assembleLayout();
@@ -60,6 +58,9 @@ export const MediaWidget = GObject.registerClass(
       watch("show-artist", () => this.applyShowArtist());
       watch("show-controls", () => this.applyShowControls());
       watch("widget-width", () => {
+        this.refreshAnimatedSize();
+      });
+      watch("widget-height", () => {
         this.refreshAnimatedSize();
       });
       watch("background-opacity", () => {
@@ -96,6 +97,13 @@ export const MediaWidget = GObject.registerClass(
       );
     }
 
+    getWidgetHeight() {
+      return this.getIntPropertyFromSettings(
+        "widget-height",
+        DEFAULT_WIDGET_HEIGHT,
+      );
+    }
+
     getAnimationDuration() {
       return this.getIntPropertyFromSettings(
         "animation-duration",
@@ -109,72 +117,15 @@ export const MediaWidget = GObject.registerClass(
         : DEFAULT_BACKGROUND_OPACITY;
     }
 
-    getDockWidth() {
-      if (!this._dockBox) {
-        return 0;
-      }
-
-      return typeof this._dockBox.get_width === "function"
-        ? this._dockBox.get_width()
-        : this._dockBox.width || 0;
-    }
-
-    setDockBox(dockBox) {
-      this._dockBox = dockBox;
-      this._isDockVertical = !!(dockBox &&
-      typeof dockBox.get_vertical === "function"
-        ? dockBox.get_vertical()
-        : dockBox?.vertical);
-      this.set_x_expand(this._isDockVertical);
-      this.set_y_expand(false);
-      this.applyDockLayout();
-      this.refreshAnimatedSize();
-    }
-
-    setDockIconSize(iconSize) {
-      this._dockIconSize = iconSize;
-      this.refreshAnimatedSize();
-    }
-
-    applyDockLayout() {
-      if (!this._mainContainer) {
-        return;
-      }
-
-      this._mainContainer.vertical = this._isDockVertical;
-      this._mainContainer.spacing = this._isDockVertical ? 8 : 0;
-      this._mainContainer.queue_relayout();
-      this.queue_relayout();
-    }
-
-    getExpandedSize() {
-      const preferredSize = this.get_preferred_size
-        ? this.get_preferred_size()
-        : null;
-      const preferredWidth = preferredSize?.[1] ?? this.getWidgetWidth();
-      const preferredHeight =
-        preferredSize?.[3] ?? this._dockIconSize ?? this.getWidgetWidth();
-      const dockWidth = this.getDockWidth();
-
-      const widthLimit = dockWidth > 0 ? dockWidth : this.getWidgetWidth();
-
-      return {
-        width: Math.max(0, Math.min(preferredWidth, widthLimit)),
-        height: Math.max(0, preferredHeight),
-      };
-    }
-
     refreshAnimatedSize() {
       if (this._currentStatus === COLLAPSED) {
         return;
       }
 
-      const size = this.getExpandedSize();
-
       this.remove_all_transitions();
       this.ease({
-        width: size.width,
-        height: size.height,
+        width: this.getWidgetWidth(),
+        height: this.getWidgetHeight(),
         duration: this.getAnimationDuration(),
         mode: Clutter.AnimationMode.EASE_OUT_QUAD,
       });
@@ -516,11 +467,9 @@ export const MediaWidget = GObject.registerClass(
       this.set_height(0);
       this.set_opacity(0);
 
-      const size = this.getExpandedSize();
-
       this.ease({
-        width: size.width,
-        height: size.height,
+        width: this.getWidgetWidth(),
+        height: this.getWidgetHeight(),
         opacity: 255,
         duration: this.getAnimationDuration(),
         mode: Clutter.AnimationMode.EASE_OUT_QUAD,
