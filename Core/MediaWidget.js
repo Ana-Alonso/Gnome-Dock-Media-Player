@@ -20,6 +20,12 @@ const DEFAULT_ANIMATION_DURATION = 300;
 const DEFAULT_BACKGROUND_OPACITY = 0.5;
 const DEFAULT_SHOW_ARTIST = true;
 const DEFAULT_SHOW_CONTROLS = true;
+const COMPACT_LAYOUT_WIDTH = 260;
+const COMPACT_LAYOUT_HEIGHT = 88;
+const MIN_CONTROL_ICON_SIZE = 10;
+const MAX_CONTROL_ICON_SIZE = 16;
+const MIN_COVER_SIZE = 24;
+const MAX_COVER_SIZE = 64;
 
 export const MediaWidget = GObject.registerClass(
   class MediaWidget extends St.BoxLayout {
@@ -58,9 +64,11 @@ export const MediaWidget = GObject.registerClass(
       watch("show-artist", () => this.applyShowArtist());
       watch("show-controls", () => this.applyShowControls());
       watch("widget-width", () => {
+        this.applyResponsiveLayout();
         this.refreshAnimatedSize();
       });
       watch("widget-height", () => {
+        this.applyResponsiveLayout();
         this.refreshAnimatedSize();
       });
       watch("background-opacity", () => {
@@ -117,6 +125,103 @@ export const MediaWidget = GObject.registerClass(
         : DEFAULT_BACKGROUND_OPACITY;
     }
 
+    isCompactLayout() {
+      return (
+        this.getWidgetWidth() <= COMPACT_LAYOUT_WIDTH ||
+        this.getWidgetHeight() <= COMPACT_LAYOUT_HEIGHT
+      );
+    }
+
+    clamp(value, minimum, maximum) {
+      return Math.max(minimum, Math.min(maximum, value));
+    }
+
+    getControlIconSize() {
+      const baseSize = Math.floor(
+        Math.min(this.getWidgetWidth(), this.getWidgetHeight()) / 6,
+      );
+
+      return this.clamp(baseSize, MIN_CONTROL_ICON_SIZE, MAX_CONTROL_ICON_SIZE);
+    }
+
+    getCoverArtSize() {
+      const baseSize = Math.floor(
+        Math.min(this.getWidgetWidth(), this.getWidgetHeight()) *
+          (this.isCompactLayout() ? 0.42 : 0.58),
+      );
+
+      return this.clamp(baseSize, MIN_COVER_SIZE, MAX_COVER_SIZE);
+    }
+
+    setIconSize(icon, size) {
+      if (!icon) {
+        return;
+      }
+
+      icon.set_style(`icon-size: ${size}px;`);
+    }
+
+    applyResponsiveLayout() {
+      if (!this._mainContainer) {
+        return;
+      }
+
+      const compact = this.isCompactLayout();
+      const controlIconSize = this.getControlIconSize();
+      const coverArtSize = this.getCoverArtSize();
+
+      this._mainContainer.vertical = compact;
+      this._mainContainer.spacing = compact ? 8 : 12;
+
+      this._rightContainer.vertical = true;
+      this._rightContainer.spacing = compact ? 4 : 0;
+      this._rightContainer.x_expand = true;
+      this._rightContainer.y_expand = true;
+
+      this._mediaTitle.y_align = compact
+        ? Clutter.ActorAlign.CENTER
+        : Clutter.ActorAlign.START;
+      this._mediaTitle.x_align = compact
+        ? Clutter.ActorAlign.CENTER
+        : Clutter.ActorAlign.START;
+      this._mediaTitle.x_expand = true;
+
+      this._rightContainerBottomRow.vertical = compact;
+      this._rightContainerBottomRow.spacing = compact ? 4 : 8;
+      this._rightContainerBottomRow.y_align = compact
+        ? Clutter.ActorAlign.CENTER
+        : Clutter.ActorAlign.END;
+
+      this._artistName.y_align = Clutter.ActorAlign.CENTER;
+      this._artistName.x_align = compact
+        ? Clutter.ActorAlign.CENTER
+        : Clutter.ActorAlign.START;
+      this._artistName.x_expand = true;
+
+      this._playbackControls.vertical = compact;
+      this._playbackControls.spacing = compact ? 2 : 4;
+      this._playbackControls.x_align = compact
+        ? Clutter.ActorAlign.CENTER
+        : Clutter.ActorAlign.END;
+      this._playbackControls.y_align = Clutter.ActorAlign.CENTER;
+
+      this._albumCoverArt.x_align = Clutter.ActorAlign.CENTER;
+      this._albumCoverArt.y_align = Clutter.ActorAlign.CENTER;
+      this._albumCoverArt.set_size(coverArtSize, coverArtSize);
+
+      this.setIconSize(this._playIcon, controlIconSize);
+      this.setIconSize(this._pauseIcon, controlIconSize);
+      this.setIconSize(this._previousIcon, controlIconSize);
+      this.setIconSize(this._nextIcon, controlIconSize);
+      this.setIconSize(this._albumCoverArtFallbackIcon, controlIconSize + 2);
+
+      this._mainContainer.queue_relayout();
+      this._rightContainer.queue_relayout();
+      this._rightContainerBottomRow.queue_relayout();
+      this._playbackControls.queue_relayout();
+      this.queue_relayout();
+    }
+
     refreshAnimatedSize() {
       if (this._currentStatus === COLLAPSED) {
         return;
@@ -142,6 +247,7 @@ export const MediaWidget = GObject.registerClass(
         this._artistName.hide();
       }
 
+      this.applyResponsiveLayout();
       this.refreshAnimatedSize();
     }
 
@@ -156,6 +262,7 @@ export const MediaWidget = GObject.registerClass(
         this._playbackControls.hide();
       }
 
+      this.applyResponsiveLayout();
       this.refreshAnimatedSize();
     }
 
